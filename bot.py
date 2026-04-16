@@ -1,12 +1,10 @@
 import os
 import json
-import time
 import logging
 import requests
+import telebot
 from bs4 import BeautifulSoup
 from apscheduler.schedulers.background import BackgroundScheduler
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,6 +12,8 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 DATA_FILE = "products.json"
+
+bot = telebot.TeleBot(TOKEN)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -33,9 +33,6 @@ def save_products(products):
 def get_price_trendyol(soup):
     try:
         price = soup.select_one(".prc-dsc")
-        if price:
-            return price.get_text(strip=True)
-        price = soup.select_one(".product-price-container .prc-dsc")
         if price:
             return price.get_text(strip=True)
     except:
@@ -72,9 +69,6 @@ def get_price_n11(soup):
         price = soup.select_one(".newPrice ins")
         if price:
             return price.get_text(strip=True)
-        price = soup.select_one(".price ins")
-        if price:
-            return price.get_text(strip=True)
     except:
         pass
     return None
@@ -96,20 +90,18 @@ def fetch_price(url):
         elif "n11.com" in url:
             return get_price_n11(soup)
         else:
-            # Genel fiyat deneme
             for selector in [".price", ".product-price", "[class*='price']"]:
                 el = soup.select_one(selector)
                 if el:
                     return el.get_text(strip=True)
     except Exception as e:
-        logger.error(f"Fiyat çekme hatası {url}: {e}")
+        logger.error(f"Fiyat cekme hatasi {url}: {e}")
     return None
 
 def parse_price_value(price_str):
     if not price_str:
         return None
     import re
-    # Sayısal değeri çıkar
     cleaned = re.sub(r"[^\d,\.]", "", price_str)
     cleaned = cleaned.replace(".", "").replace(",", ".")
     try:
@@ -117,9 +109,11 @@ def parse_price_value(price_str):
     except:
         return None
 
-async def send_message(text):
-    bot = Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="HTML")
+def send_notification(text):
+    try:
+        bot.send_message(CHAT_ID, text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Bildirim hatasi: {e}")
 
 def check_prices():
     products = load_products()
@@ -130,7 +124,7 @@ def check_prices():
         try:
             current_price_str = fetch_price(url)
             if not current_price_str:
-                logger.warning(f"Fiyat alınamadı: {url}")
+                logger.warning(f"Fiyat alinamadi: {url}")
                 continue
 
             current_val = parse_price_value(current_price_str)
@@ -139,108 +133,100 @@ def check_prices():
             logger.info(f"{data.get('name', url)}: {current_price_str}")
 
             if old_val and current_val and current_val < old_val:
-                import asyncio
                 msg = (
-                    f"🎉 <b>İNDİRİM ALGILANDI!</b>\n\n"
-                    f"📦 <b>{data.get('name', 'Ürün')}</b>\n"
-                    f"💰 Eski fiyat: {data['last_price']}\n"
-                    f"✅ Yeni fiyat: {current_price_str}\n"
-                    f"🔗 <a href='{url}'>Ürüne git</a>"
+                    f"Indirim Algilandi!\n\n"
+                    f"Urun: {data.get('name', 'Urun')}\n"
+                    f"Eski fiyat: {data['last_price']}\n"
+                    f"Yeni fiyat: {current_price_str}\n"
+                    f"Link: {url}"
                 )
-                asyncio.run(send_message(msg))
+                send_notification(msg)
 
             products[url]["last_price"] = current_price_str
             save_products(products)
 
         except Exception as e:
-            logger.error(f"Kontrol hatası {url}: {e}")
+            logger.error(f"Kontrol hatasi {url}: {e}")
 
-# --- Telegram Komutları ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Merhaba! Ben fiyat takip botuyum.\n\n"
-        "📌 Komutlar:\n"
-        "/ekle <url> <isim> - Ürün ekle\n"
-        "/listele - Takip edilen ürünler\n"
-        "/sil <url> - Ürün sil\n"
-        "/kontrol - Şimdi fiyatları kontrol et"
+@bot.message_handler(commands=["start"])
+def cmd_start(message):
+    bot.reply_to(message,
+        "Merhaba! Ben fiyat takip botuyum.\n\n"
+        "Komutlar:\n"
+        "/ekle <url> <isim> - Urun ekle\n"
+        "/listele - Takip edilen urunler\n"
+        "/sil <url> - Urun sil\n"
+        "/kontrol - Simdi fiyatlari kontrol et"
     )
 
-async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 1:
-        await update.message.reply_text("Kullanım: /ekle <url> <isim>")
+@bot.message_handler(commands=["ekle"])
+def cmd_ekle(message):
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 2:
+        bot.reply_to(message, "Kullanim: /ekle <url> <isim>")
         return
 
-    url = context.args[0]
-    name = " ".join(context.args[1:]) if len(context.args) > 1 else url[:50]
+    url = parts[1]
+    name = parts[2] if len(parts) > 2 else url[:50]
 
-    await update.message.reply_text("🔍 Fiyat kontrol ediliyor...")
+    bot.reply_to(message, "Fiyat kontrol ediliyor...")
 
     price = fetch_price(url)
     if not price:
-        await update.message.reply_text("❌ Fiyat alınamadı. URL'yi kontrol edin.")
+        bot.reply_to(message, "Fiyat alinamadi. URL'yi kontrol edin.")
         return
 
     products = load_products()
     products[url] = {"name": name, "last_price": price}
     save_products(products)
 
-    await update.message.reply_text(
-        f"✅ Eklendi!\n📦 {name}\n💰 Mevcut fiyat: {price}"
-    )
+    bot.reply_to(message, f"Eklendi!\nUrun: {name}\nMevcut fiyat: {price}")
 
-async def listele(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@bot.message_handler(commands=["listele"])
+def cmd_listele(message):
     products = load_products()
     if not products:
-        await update.message.reply_text("📭 Takip edilen ürün yok.")
+        bot.reply_to(message, "Takip edilen urun yok.")
         return
 
-    msg = "📋 <b>Takip Edilen Ürünler:</b>\n\n"
+    msg = "Takip Edilen Urunler:\n\n"
     for url, data in products.items():
-        msg += f"📦 {data.get('name', 'İsimsiz')}\n"
-        msg += f"💰 Son fiyat: {data.get('last_price', 'Bilinmiyor')}\n"
-        msg += f"🔗 {url[:60]}...\n\n"
+        msg += f"Urun: {data.get('name', 'Isimsiz')}\n"
+        msg += f"Son fiyat: {data.get('last_price', 'Bilinmiyor')}\n"
+        msg += f"Link: {url[:60]}\n\n"
 
-    await update.message.reply_text(msg, parse_mode="HTML")
+    bot.reply_to(message, msg)
 
-async def sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Kullanım: /sil <url>")
+@bot.message_handler(commands=["sil"])
+def cmd_sil(message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "Kullanim: /sil <url>")
         return
 
-    url = context.args[0]
+    url = parts[1]
     products = load_products()
 
     if url in products:
         name = products[url].get("name", url)
         del products[url]
         save_products(products)
-        await update.message.reply_text(f"🗑️ Silindi: {name}")
+        bot.reply_to(message, f"Silindi: {name}")
     else:
-        await update.message.reply_text("❌ Ürün bulunamadı.")
+        bot.reply_to(message, "Urun bulunamadi.")
 
-async def kontrol(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔄 Fiyatlar kontrol ediliyor...")
+@bot.message_handler(commands=["kontrol"])
+def cmd_kontrol(message):
+    bot.reply_to(message, "Fiyatlar kontrol ediliyor...")
     check_prices()
-    await update.message.reply_text("✅ Kontrol tamamlandı!")
+    bot.reply_to(message, "Kontrol tamamlandi!")
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ekle", ekle))
-    app.add_handler(CommandHandler("listele", listele))
-    app.add_handler(CommandHandler("sil", sil))
-    app.add_handler(CommandHandler("kontrol", kontrol))
-
-    # Her saat başı fiyat kontrol
     scheduler = BackgroundScheduler()
     scheduler.add_job(check_prices, "interval", hours=1)
     scheduler.start()
-
-    logger.info("Bot başlatıldı!")
-    app.run_polling()
+    logger.info("Bot baslatildi!")
+    bot.infinity_polling()
 
 if __name__ == "__main__":
-    main()
+    main() 

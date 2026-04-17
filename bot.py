@@ -28,6 +28,9 @@ def scrape_url(url):
 
 def get_price_trendyol(soup):
     try:
+        price = soup.select_one("span.discounted")
+        if price:
+            return price.get_text(strip=True)
         price = soup.select_one(".prc-dsc")
         if price:
             return price.get_text(strip=True)

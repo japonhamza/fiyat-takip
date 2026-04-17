@@ -11,28 +11,27 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+SCRAPER_KEY = os.environ.get("SCRAPER_API_KEY")
 DATA_FILE = "products.json"
 
 bot = telebot.TeleBot(TOKEN)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
-}
-
-def load_products():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_products(products):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, ensure_ascii=False, indent=2)
+def scrape_url(url):
+    try:
+        api_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true"
+        resp = requests.get(api_url, timeout=60)
+        resp.raise_for_status()
+        return BeautifulSoup(resp.text, "html.parser")
+    except Exception as e:
+        logger.error(f"Scrape hatasi {url}: {e}")
+    return None
 
 def get_price_trendyol(soup):
     try:
         price = soup.select_one(".prc-dsc")
+        if price:
+            return price.get_text(strip=True)
+        price = soup.select_one(".product-price-container span")
         if price:
             return price.get_text(strip=True)
     except:
@@ -73,30 +72,33 @@ def get_price_n11(soup):
         pass
     return None
 
-def fetch_price(url):
-    try:
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        resp = session.get(url, timeout=15)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        if "trendyol.com" in url:
-            return get_price_trendyol(soup)
-        elif "hepsiburada.com" in url:
-            return get_price_hepsiburada(soup)
-        elif "amazon.com.tr" in url:
-            return get_price_amazon(soup)
-        elif "n11.com" in url:
-            return get_price_n11(soup)
-        else:
-            for selector in [".price", ".product-price", "[class*='price']"]:
-                el = soup.select_one(selector)
-                if el:
-                    return el.get_text(strip=True)
-    except Exception as e:
-        logger.error(f"Fiyat cekme hatasi {url}: {e}")
+def get_price_generic(soup):
+    for selector in [".price", ".product-price", "[class*='price']", "[class*='Price']"]:
+        try:
+            el = soup.select_one(selector)
+            if el:
+                text = el.get_text(strip=True)
+                if any(c.isdigit() for c in text):
+                    return text
+        except:
+            pass
     return None
+
+def fetch_price(url):
+    soup = scrape_url(url)
+    if not soup:
+        return None
+
+    if "trendyol.com" in url:
+        return get_price_trendyol(soup)
+    elif "hepsiburada.com" in url:
+        return get_price_hepsiburada(soup)
+    elif "amazon.com.tr" in url:
+        return get_price_amazon(soup)
+    elif "n11.com" in url:
+        return get_price_n11(soup)
+    else:
+        return get_price_generic(soup)
 
 def parse_price_value(price_str):
     if not price_str:
@@ -109,9 +111,19 @@ def parse_price_value(price_str):
     except:
         return None
 
+def load_products():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_products(products):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(products, f, ensure_ascii=False, indent=2)
+
 def send_notification(text):
     try:
-        bot.send_message(CHAT_ID, text, parse_mode="HTML")
+        bot.send_message(CHAT_ID, text)
     except Exception as e:
         logger.error(f"Bildirim hatasi: {e}")
 
@@ -169,7 +181,7 @@ def cmd_ekle(message):
     url = parts[1]
     name = parts[2] if len(parts) > 2 else url[:50]
 
-    bot.reply_to(message, "Fiyat kontrol ediliyor...")
+    bot.reply_to(message, "Fiyat kontrol ediliyor... (30-60 saniye sürebilir)")
 
     price = fetch_price(url)
     if not price:
@@ -229,4 +241,4 @@ def main():
     bot.infinity_polling()
 
 if __name__ == "__main__":
-    main() 
+    main()

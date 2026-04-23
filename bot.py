@@ -68,9 +68,14 @@ def get_price_amazon(soup):
 
 def get_price_n11(soup):
     try:
-        price = soup.select_one(".newPrice ins")
+        price = soup.select_one("div.newPrice ins")
         if price:
             return price.get_text(strip=True)
+        price = soup.select_one("ins")
+        if price:
+            text = price.get_text(strip=True)
+            if "TL" in text:
+                return text
     except:
         pass
     return None

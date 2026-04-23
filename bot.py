@@ -68,14 +68,27 @@ def get_price_amazon(soup):
 
 def get_price_n11(soup):
     try:
+        # JSON-LD structured data dene
+        import json
+        scripts = soup.find_all("script", type="application/ld+json")
+        for script in scripts:
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict):
+                    if data.get("@type") == "Product":
+                        offers = data.get("offers", {})
+                        price = offers.get("price")
+                        if price:
+                            return f"{price} TL"
+            except:
+                pass
+        # Normal selector
         price = soup.select_one("div.newPrice ins")
         if price:
             return price.get_text(strip=True)
-        price = soup.select_one("ins")
+        price = soup.select_one(".newPrice ins")
         if price:
-            text = price.get_text(strip=True)
-            if "TL" in text:
-                return text
+            return price.get_text(strip=True)
     except:
         pass
     return None

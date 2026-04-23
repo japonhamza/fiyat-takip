@@ -18,7 +18,7 @@ bot = telebot.TeleBot(TOKEN)
 
 def scrape_url(url):
     try:
-        api_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true"
+        api_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true&country_code=tr"
         resp = requests.get(api_url, timeout=60)
         resp.raise_for_status()
         return BeautifulSoup(resp.text, "html.parser")

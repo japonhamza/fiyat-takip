@@ -106,6 +106,9 @@ def get_price_generic(soup):
     return None
 
 def fetch_price(url):
+    if "n11.com" in url:
+        return fetch_price_n11_direct(url)
+    
     soup = scrape_url(url)
     if not soup:
         return None
@@ -116,10 +119,21 @@ def fetch_price(url):
         return get_price_hepsiburada(soup)
     elif "amazon.com.tr" in url:
         return get_price_amazon(soup)
-    elif "n11.com" in url:
-        return get_price_n11(soup)
     else:
         return get_price_generic(soup)
+
+def fetch_price_n11_direct(url):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "tr-TR,tr;q=0.9",
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        return get_price_n11(soup)
+    except Exception as e:
+        logger.error(f"N11 direkt hatasi: {e}")
+    return None
 
 def parse_price_value(price_str):
     if not price_str:
